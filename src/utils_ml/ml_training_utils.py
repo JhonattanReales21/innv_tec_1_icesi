@@ -83,7 +83,7 @@ def evaluate_model_with_recursive_window(
         # )
 
         # Entrena el modelo y realiza predicciones
-        model.fit(X_train, y_train, njobs=-1, verbose=False)
+        model.fit(X_train, y_train)
         y_pred_val = trans_pred(model.predict(X_val))
         y_pred_train = trans_pred(model.predict(X_train))
 
