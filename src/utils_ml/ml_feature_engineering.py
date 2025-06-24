@@ -202,3 +202,32 @@ def create_stl_features(
     df.drop(columns=["stl_trend", "stl_seasonal"], inplace=True)
 
     return df
+
+
+def cap_upper_outliers(
+    df: pd.DataFrame, target_col: str, group_col: str
+) -> pd.DataFrame:
+    """
+    Aplana los outliers superiores por grupo, reemplazándolos por el umbral superior Q3 + 1.5*IQR.
+
+    Parámetros:
+    - df: DataFrame con columna objetivo.
+    - target_col: Nombre de la columna de demanda.
+    - group_col: Columna de agrupación (por ejemplo, 'sku').
+
+    Retorna:
+    - DataFrame con valores extremos superiores capados.
+    """
+    df = df.copy()
+
+    def _cap_outliers(group):
+        q1 = group[target_col].quantile(0.25)
+        q3 = group[target_col].quantile(0.75)
+        iqr = q3 - q1
+        upper_bound = q3 + 1.5 * iqr
+        group[target_col] = np.where(
+            group[target_col] > upper_bound, upper_bound, group[target_col]
+        )
+        return group
+
+    return df.groupby(group_col, group_keys=False).apply(_cap_outliers)
