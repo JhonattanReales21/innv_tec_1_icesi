@@ -1,5 +1,9 @@
 import plotly.graph_objects as go
 from statsmodels.tsa.seasonal import STL
+import optuna.visualization as vis
+import matplotlib.pyplot as plt
+
+import pandas as pd
 
 
 def graficar_serie_con_descomposicion(df_sku, sku, periodo=7):
@@ -76,3 +80,129 @@ def graficar_serie_con_descomposicion(df_sku, sku, periodo=7):
     )
 
     fig.show()
+
+
+def mostrar_graficas_optuna(study, model_name="Modelo"):
+    """
+    Genera y muestra múltiples visualizaciones del estudio de Optuna:
+    - Frontera de Pareto
+    - Importancia de parámetros
+    - Coordenadas paralelas (para SMAPE)
+    - Historia de optimización (para GAP)
+
+    Se asume que el estudio es multiobjetivo con `values[0]` = SMAPE y `values[1]` = GAP.
+    """
+    try:
+        print("📊 Mostrando gráfica de frontera de Pareto...")
+        vis.plot_pareto_front(study, target_names=["SMAPE", "GAP"]).show()
+    except Exception as e:
+        print(f"❌ Error al mostrar la gráfica de Pareto: {e}")
+
+    try:
+        print("📊 Mostrando importancia de parámetros...")
+        vis.plot_param_importances(study).show()
+    except Exception as e:
+        print(f"❌ Error al mostrar importancia de parámetros: {e}")
+
+    try:
+        if model_name == "XGBRegressor":
+            print("📊 Mostrando coordenadas paralelas (SMAPE)...")
+            vis.plot_parallel_coordinate(
+                study,
+                params=[
+                    "max_depth",
+                    "learning_rate",
+                    "n_estimators",
+                    "subsample",
+                    "colsample_bytree",
+                    "reg_alpha",
+                    "reg_lambda",
+                    "min_child_weight",
+                ],
+                target=lambda trial: trial.values[0],
+                target_name="SMAPE",
+            ).show()
+
+        elif model_name == "RandomForestRegressor":
+            print("📊 Mostrando coordenadas paralelas (SMAPE)...")
+            vis.plot_parallel_coordinate(
+                study,
+                params=[
+                    "n_estimators",
+                    "max_depth",
+                    "min_samples_split",
+                    "min_samples_leaf",
+                    "max_features",
+                ],
+                target=lambda trial: trial.values[0],
+                target_name="SMAPE",
+            ).show()
+    except Exception as e:
+        print(f"❌ Error al mostrar coordenadas paralelas: {e}")
+
+    try:
+        print("📊 Mostrando historia de optimización (GAP)...")
+        vis.plot_optimization_history(
+            study,
+            target=lambda trial: trial.values[1],
+            target_name="GAP",
+        ).show()
+    except Exception as e:
+        print(f"❌ Error al mostrar historia de optimización: {e}")
+
+
+def plot_forecast_per_sku(
+    df_full: pd.DataFrame,
+    df_test_results: pd.DataFrame,
+    target_col: str,
+    sku_col: str = "sku",
+    test_size: int = 7,
+    n_train_days: int = 60,
+):
+    """
+    Genera gráficas de comparación entre entrenamiento, test real y predicción para cada SKU.
+
+    Parámetros:
+    - df_full: DataFrame completo con la columna target y SKU.
+    - df_test_results: DataFrame con predicciones y métricas por SKU.
+    - target_col: Columna objetivo (ej: 'pedidos').
+    - sku_col: Nombre de la columna que contiene los SKUs.
+    - test_size: Tamaño del conjunto de test (en días).
+    - n_train_days: Cuántos días previos al test se mostrarán como entrenamiento.
+    """
+
+    for _, row in df_test_results.iterrows():
+        sku = row["SKU"]
+        pred = row["forecast"]
+
+        df_sku = df_full[df_full[sku_col] == sku].copy().reset_index(drop=True)
+        df_train = df_sku.iloc[-(test_size + n_train_days) : -test_size]
+        df_test = df_sku.iloc[-test_size:]
+
+        idx_train = df_train.index
+        idx_test = df_test.index
+        idx_split = df_test.index[0] - 0.5
+
+        plt.figure(figsize=(12, 5))
+
+        # Train: gris
+        plt.plot(idx_train, df_train[target_col], color="gray", label="Train")
+
+        # Test real: naranja
+        plt.plot(idx_test, df_test[target_col], color="orange", label="Test Real")
+
+        # Forecast: azul
+        plt.plot(idx_test, pred, color="blue", label=f"Forecast ({row['Modelo']})")
+
+        # Línea vertical de corte
+        plt.axvline(
+            x=idx_split, color="black", linestyle="--", label="Train/Test split"
+        )
+
+        plt.title(f"SKU: {sku} | Modelo: {row['Modelo']}")
+        plt.xlabel("Periodo")
+        plt.ylabel(target_col.capitalize())
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()
