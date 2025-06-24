@@ -80,7 +80,7 @@ def graficar_serie_con_descomposicion(df_sku, sku, periodo=7):
     fig.show()
 
 
-def mostrar_graficas_optuna(study):
+def mostrar_graficas_optuna(study, model_name="Modelo"):
     """
     Genera y muestra múltiples visualizaciones del estudio de Optuna:
     - Frontera de Pareto
@@ -103,22 +103,38 @@ def mostrar_graficas_optuna(study):
         print(f"❌ Error al mostrar importancia de parámetros: {e}")
 
     try:
-        print("📊 Mostrando coordenadas paralelas (SMAPE)...")
-        vis.plot_parallel_coordinate(
-            study,
-            params=[
-                "max_depth",
-                "learning_rate",
-                "n_estimators",
-                "subsample",
-                "colsample_bytree",
-                "reg_alpha",
-                "reg_lambda",
-                "min_child_weight",
-            ],
-            target=lambda trial: trial.values[0],
-            target_name="SMAPE",
-        ).show()
+        if model_name == "XGBRegressor":
+            print("📊 Mostrando coordenadas paralelas (SMAPE)...")
+            vis.plot_parallel_coordinate(
+                study,
+                params=[
+                    "max_depth",
+                    "learning_rate",
+                    "n_estimators",
+                    "subsample",
+                    "colsample_bytree",
+                    "reg_alpha",
+                    "reg_lambda",
+                    "min_child_weight",
+                ],
+                target=lambda trial: trial.values[0],
+                target_name="SMAPE",
+            ).show()
+
+        elif model_name == "RandomForestRegressor":
+            print("📊 Mostrando coordenadas paralelas (SMAPE)...")
+            vis.plot_parallel_coordinate(
+                study,
+                params=[
+                    "n_estimators",
+                    "max_depth",
+                    "min_samples_split",
+                    "min_samples_leaf",
+                    "max_features",
+                ],
+                target=lambda trial: trial.values[0],
+                target_name="SMAPE",
+            ).show()
     except Exception as e:
         print(f"❌ Error al mostrar coordenadas paralelas: {e}")
 

@@ -168,8 +168,12 @@ def optimize_model_with_optuna(
     # Mostrar mejores resultados
     print("\n📌 Mejores Trials:")
     for i, trial in enumerate(study.best_trials):
-        print(f"Trial {i} - SMAPE: {trial.values[0]:.4f}, GAP: {trial.values[1]:.4f}")
+        if i < 5:
+            print(
+                f"Trial {i} - SMAPE: {trial.values[0]:.4f}, GAP: {trial.values[1]:.4f}"
+            )
 
+    print("\nNúmero total de Best Trials ('Frente de pareto'):", len(study.best_trials))
     print("\n🏆 Best Trial Params:")
     print(study.best_trials[0].params)
 
