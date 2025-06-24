@@ -3,6 +3,8 @@ from statsmodels.tsa.seasonal import STL
 import optuna.visualization as vis
 import matplotlib.pyplot as plt
 
+import pandas as pd
+
 
 def graficar_serie_con_descomposicion(df_sku, sku, periodo=7):
     """
@@ -147,3 +149,60 @@ def mostrar_graficas_optuna(study, model_name="Modelo"):
         ).show()
     except Exception as e:
         print(f"❌ Error al mostrar historia de optimización: {e}")
+
+
+def plot_forecast_per_sku(
+    df_full: pd.DataFrame,
+    df_test_results: pd.DataFrame,
+    target_col: str,
+    sku_col: str = "sku",
+    test_size: int = 7,
+    n_train_days: int = 60,
+):
+    """
+    Genera gráficas de comparación entre entrenamiento, test real y predicción para cada SKU.
+
+    Parámetros:
+    - df_full: DataFrame completo con la columna target y SKU.
+    - df_test_results: DataFrame con predicciones y métricas por SKU.
+    - target_col: Columna objetivo (ej: 'pedidos').
+    - sku_col: Nombre de la columna que contiene los SKUs.
+    - test_size: Tamaño del conjunto de test (en días).
+    - n_train_days: Cuántos días previos al test se mostrarán como entrenamiento.
+    """
+
+    for _, row in df_test_results.iterrows():
+        sku = row["SKU"]
+        pred = row["forecast"]
+
+        df_sku = df_full[df_full[sku_col] == sku].copy().reset_index(drop=True)
+        df_train = df_sku.iloc[-(test_size + n_train_days) : -test_size]
+        df_test = df_sku.iloc[-test_size:]
+
+        idx_train = df_train.index
+        idx_test = df_test.index
+        idx_split = df_test.index[0] - 0.5
+
+        plt.figure(figsize=(12, 5))
+
+        # Train: gris
+        plt.plot(idx_train, df_train[target_col], color="gray", label="Train")
+
+        # Test real: naranja
+        plt.plot(idx_test, df_test[target_col], color="orange", label="Test Real")
+
+        # Forecast: azul
+        plt.plot(idx_test, pred, color="blue", label=f"Forecast ({row['Modelo']})")
+
+        # Línea vertical de corte
+        plt.axvline(
+            x=idx_split, color="black", linestyle="--", label="Train/Test split"
+        )
+
+        plt.title(f"SKU: {sku} | Modelo: {row['Modelo']}")
+        plt.xlabel("Periodo")
+        plt.ylabel(target_col.capitalize())
+        plt.legend()
+        plt.grid(True)
+        plt.tight_layout()
+        plt.show()

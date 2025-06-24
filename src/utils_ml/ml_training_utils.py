@@ -1,10 +1,18 @@
 import numpy as np
-from sklearn.metrics import mean_squared_error
+from sklearn.metrics import mean_squared_error, mean_absolute_error
 import pandas as pd
 
 import optuna
 from typing import Callable, Dict, Any
 from sklearn.base import RegressorMixin
+
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.linear_model import ElasticNet
+from sklearn.neighbors import KNeighborsRegressor
+from sklearn.ensemble import RandomForestRegressor
+from xgboost import XGBRegressor
+import ast
 
 
 def trans_pred(predicciones):
@@ -31,6 +39,28 @@ def smape(y_true, y_pred):
     diff = np.abs(y_true - y_pred) / denominator
     diff[denominator == 0] = 0.0  # Evita división por cero
     return 200 * np.mean(diff)
+
+
+def mape_mod(y_true, y_pred):
+    """
+    Calcula el MAPE modificado (Mean Absolute Percentage Error).
+
+    Parámetros:
+    - y_true: Valores reales.
+    - y_pred: Valores predichos.
+
+    Retorna:
+    - MAPE modificado como porcentaje.
+    """
+    y_true, y_pred = np.array(y_true), np.array(y_pred)
+
+    # Evita división por cero: solo considera valores donde y_true ≠ 0
+    non_zero = y_true != 0
+
+    # Calcula el MAPE sobre esos valores
+    return (
+        np.mean(np.abs((y_true[non_zero] - y_pred[non_zero]) / y_true[non_zero])) * 100
+    )
 
 
 def evaluate_model_with_recursive_window(
@@ -182,3 +212,126 @@ def optimize_model_with_optuna(
     # )
 
     return study
+
+
+def evaluate_model_test(
+    model: RegressorMixin,
+    X_test: pd.DataFrame,
+    y_test: pd.Series,
+) -> tuple:
+    """
+    Evalúa un modelo en el conjunto de prueba y calcula SMAPE y GAP.
+
+    Parámetros:
+    - model: Modelo ya entrenado.
+    - X_test: Variables predictoras del conjunto de prueba.
+    - y_test: Variable objetivo del conjunto de prueba.
+
+    Retorna:
+    - SMAPE en el conjunto de prueba.
+    - GAP entre entrenamiento y prueba.
+    """
+
+    return "f"
+
+
+def evaluate_models_on_test(
+    df: pd.DataFrame,
+    df_best_models: pd.DataFrame,
+    target_col: str,
+    feature_cols: list,
+    sku_col: str = "sku",
+    test_size: int = 7,
+) -> pd.DataFrame:
+    """
+    Reentrena y evalúa el mejor modelo por SKU en el set de test (últimos test_size días).
+
+    Parámetros:
+    - df: DataFrame completo con las series.
+    - df_best_models: DataFrame con columnas 'sku', 'model', 'best_params'.
+    - target_col: Nombre de la columna objetivo.
+    - feature_cols: Lista de variables predictoras.
+    - sku_col: Columna identificadora del SKU.
+    - test_size: Número de días para el test set final.
+
+    Retorna:
+    - DataFrame con métricas por SKU y predicciones.
+    """
+
+    resultados_test = []
+
+    for sku in df_best_models[sku_col].unique():
+        print(f"\n🔍 Reentrenando y evaluando en test para SKU: {sku}")
+
+        df_sku = df[df[sku_col] == sku].copy()
+        df_test = df_sku[-test_size:].copy()
+        df_sku = df_sku[:-test_size]
+
+        X_train = df_sku[feature_cols]
+        y_train = df_sku[target_col]
+        X_test = df_test[feature_cols]
+        y_test = df_test[target_col]
+
+        model_name = df_best_models.loc[df_best_models[sku_col] == sku, "model"].values[
+            0
+        ]
+        raw_params = df_best_models.loc[
+            df_best_models[sku_col] == sku, "best_params"
+        ].values[0]
+        parsed_params = ast.literal_eval(raw_params)
+
+        # Limpieza para pipeline
+        if model_name in ["ElasticNet", "KNeighborsRegressor"]:
+            best_params = {
+                k.replace("model__", ""): v
+                for k, v in parsed_params.items()
+                if k.startswith("model__")
+            }
+        else:
+            best_params = parsed_params
+
+        # Inicializamos el modelo
+        if model_name == "XGBRegressor":
+            model = XGBRegressor(**best_params)
+        elif model_name == "RandomForestRegressor":
+            model = RandomForestRegressor(**best_params)
+        elif model_name == "ElasticNet":
+            model = Pipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    ("model", ElasticNet(**best_params)),
+                ]
+            )
+        elif model_name == "KNeighborsRegressor":
+            model = Pipeline(
+                [
+                    ("scaler", StandardScaler()),
+                    ("model", KNeighborsRegressor(**best_params)),
+                ]
+            )
+        else:
+            raise ValueError(f"Modelo desconocido: {model_name}")
+
+        # Entrenar y predecir
+        model.fit(X_train, y_train)
+        y_pred = trans_pred(model.predict(X_test))
+
+        # Métricas
+        rmse = np.sqrt(mean_squared_error(y_test, y_pred))
+        mae = mean_absolute_error(y_test, y_pred)
+        mape = mape_mod(y_test, y_pred)
+        smape_val = smape(y_test, y_pred)
+
+        resultados_test.append(
+            {
+                "SKU": sku,
+                "Modelo": model_name,
+                "RMSE": rmse,
+                "MAE": mae,
+                "MAPE": mape,
+                "SMAPE": smape_val,
+                "forecast": y_pred.tolist(),
+            }
+        )
+
+    return pd.DataFrame(resultados_test).sort_values(by="SKU")
