@@ -1,5 +1,7 @@
 import plotly.graph_objects as go
 from statsmodels.tsa.seasonal import STL
+import optuna.visualization as vis
+import matplotlib.pyplot as plt
 
 
 def graficar_serie_con_descomposicion(df_sku, sku, periodo=7):
@@ -76,3 +78,56 @@ def graficar_serie_con_descomposicion(df_sku, sku, periodo=7):
     )
 
     fig.show()
+
+
+def mostrar_graficas_optuna(study):
+    """
+    Genera y muestra múltiples visualizaciones del estudio de Optuna:
+    - Frontera de Pareto
+    - Importancia de parámetros
+    - Coordenadas paralelas (para SMAPE)
+    - Historia de optimización (para GAP)
+
+    Se asume que el estudio es multiobjetivo con `values[0]` = SMAPE y `values[1]` = GAP.
+    """
+    try:
+        print("📊 Mostrando gráfica de frontera de Pareto...")
+        vis.plot_pareto_front(study, target_names=["SMAPE", "GAP"]).show()
+    except Exception as e:
+        print(f"❌ Error al mostrar la gráfica de Pareto: {e}")
+
+    try:
+        print("📊 Mostrando importancia de parámetros...")
+        vis.plot_param_importances(study).show()
+    except Exception as e:
+        print(f"❌ Error al mostrar importancia de parámetros: {e}")
+
+    try:
+        print("📊 Mostrando coordenadas paralelas (SMAPE)...")
+        vis.plot_parallel_coordinate(
+            study,
+            params=[
+                "max_depth",
+                "learning_rate",
+                "n_estimators",
+                "subsample",
+                "colsample_bytree",
+                "reg_alpha",
+                "reg_lambda",
+                "min_child_weight",
+            ],
+            target=lambda trial: trial.values[0],
+            target_name="SMAPE",
+        ).show()
+    except Exception as e:
+        print(f"❌ Error al mostrar coordenadas paralelas: {e}")
+
+    try:
+        print("📊 Mostrando historia de optimización (GAP)...")
+        vis.plot_optimization_history(
+            study,
+            target=lambda trial: trial.values[1],
+            target_name="GAP",
+        ).show()
+    except Exception as e:
+        print(f"❌ Error al mostrar historia de optimización: {e}")

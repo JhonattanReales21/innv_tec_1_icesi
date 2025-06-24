@@ -15,6 +15,24 @@ def trans_pred(predicciones):
     return np.maximum(predicciones, 0)
 
 
+def smape(y_true, y_pred):
+    """
+    Calcula el SMAPE (Symmetric Mean Absolute Percentage Error).
+
+    Parámetros:
+    - y_true: Valores reales.
+    - y_pred: Valores predichos.
+
+    Retorna:
+    - SMAPE como porcentaje.
+    """
+    y_true, y_pred = np.array(y_true), np.array(y_pred)
+    denominator = np.abs(y_true) + np.abs(y_pred)
+    diff = np.abs(y_true - y_pred) / denominator
+    diff[denominator == 0] = 0.0  # Evita división por cero
+    return 200 * np.mean(diff)
+
+
 def evaluate_model_with_recursive_window(
     model,
     X: pd.DataFrame,
@@ -37,13 +55,14 @@ def evaluate_model_with_recursive_window(
     - val_size: Tamaño de la ventana de validación.
 
     Retorna:
-    - RMSE promedio en validación.
-    - GAP promedio (|RMSE_train - RMSE_val|).
+    - SMAPE promedio en validación.
+    - GAP promedio (|SMAPE_train - SMAPE_val|).
     """
-    rmse_vals = []
+    smape_vals = []
     gap_vals = []
 
     for i in range(val_iter):
+        # Define los índices de inicio y fin para entrenamiento y validación
         step = i * val_size
         end_train = step + train_size
         end_val = end_train + val_size
@@ -55,6 +74,7 @@ def evaluate_model_with_recursive_window(
         if end_val > len(X):
             break  # Evita salir de rango
 
+        # Divide los datos en entrenamiento y validación
         X_train, y_train = X.iloc[start_train:end_train], y.iloc[start_train:end_train]
         X_val, y_val = X.iloc[end_train:end_val], y.iloc[end_train:end_val]
 
@@ -62,25 +82,29 @@ def evaluate_model_with_recursive_window(
         #     f"Tamaño de entrenamiento: {len(X_train)} , Tamaño de validación: {len(X_val)}"
         # )
 
-        model.fit(X_train, y_train)
-        y_pred_val = model.predict(X_val)
-        y_pred_train = model.predict(X_train)
+        # Entrena el modelo y realiza predicciones
+        model.fit(X_train, y_train, njobs=-1, verbose=False)
+        y_pred_val = trans_pred(model.predict(X_val))
+        y_pred_train = trans_pred(model.predict(X_train))
 
-        rmse_val = np.sqrt(mean_squared_error(y_val, y_pred_val))
-        rmse_train = np.sqrt(mean_squared_error(y_train, y_pred_train))
-        gap = np.abs(rmse_train - rmse_val)
+        # calcula el smape y el gap
+        smape_val = smape(y_val, y_pred_val)
+        smape_train = smape(y_train, y_pred_train)
+        gap = np.abs(smape_train - smape_val)
 
         # print(
-        #     f"RMSE Entrenamiento: {rmse_train:.4f}, RMSE Validación: {rmse_val:.4f}, GAP: {gap:.4f}"
+        #     f"SMAPE Entrenamiento: {smape_train:.4f}, SMAPE Validación: {smape_val:.4f}, GAP: {gap:.4f}"
         # )
 
-        rmse_vals.append(rmse_val)
+        # Almacena los resultados
+        smape_vals.append(smape_val)
         gap_vals.append(gap)
 
-    avg_rmse = np.mean(rmse_vals)
+    # Calcula el SMAPE promedio y el GAP promedio
+    avg_smape = np.mean(smape_vals)
     avg_gap = np.mean(gap_vals)
 
-    return avg_rmse, avg_gap
+    return avg_smape, avg_gap
 
 
 def optimize_model_with_optuna(
@@ -97,7 +121,7 @@ def optimize_model_with_optuna(
     random_seed: int = 42,
 ) -> optuna.study.Study:
     """
-    Optimiza hiperparámetros con Optuna usando evaluación multiobjetivo: RMSE y GAP.
+    Optimiza hiperparámetros con Optuna usando evaluación multiobjetivo: SMAPE y GAP.
 
     Parámetros:
     - model_class: Clase del modelo (ej: XGBRegressor, CatBoostRegressor).
@@ -120,7 +144,7 @@ def optimize_model_with_optuna(
 
         model = model_class(**trial_params)
 
-        avg_rmse, avg_gap = evaluate_model_with_recursive_window(
+        avg_smape, avg_gap = evaluate_model_with_recursive_window(
             model=model,
             X=X,
             y=y,
@@ -130,7 +154,7 @@ def optimize_model_with_optuna(
             val_size=val_size,
         )
 
-        return avg_rmse, avg_gap
+        return round(avg_smape, 2), round(avg_gap, 2)
 
     # Crear estudio multiobjetivo
     study = optuna.create_study(
@@ -144,13 +168,13 @@ def optimize_model_with_optuna(
     # Mostrar mejores resultados
     print("\n📌 Mejores Trials:")
     for i, trial in enumerate(study.best_trials):
-        print(f"Trial {i} - RMSE: {trial.values[0]:.4f}, GAP: {trial.values[1]:.4f}")
+        print(f"Trial {i} - SMAPE: {trial.values[0]:.4f}, GAP: {trial.values[1]:.4f}")
 
     print("\n🏆 Best Trial Params:")
     print(study.best_trials[0].params)
 
-    print(
-        f"\n💡 Best Values: RMSE={study.best_trials[0].values[0]:.4f}, GAP={study.best_trials[0].values[1]:.4f}"
-    )
+    # print(
+    #     f"\n💡 Best Values: SMAPE={study.best_trials[0].values[0]:.4f}, GAP={study.best_trials[0].values[1]:.4f}"
+    # )
 
     return study
