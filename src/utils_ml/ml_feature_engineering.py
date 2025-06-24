@@ -2,6 +2,7 @@
 
 import pandas as pd
 import numpy as np
+from statsmodels.tsa.seasonal import STL
 
 
 def calcular_outliers_porcentaje(sku_data):
@@ -77,6 +78,7 @@ def create_lag_features(
     df = df.copy()
     df = df.sort_values(by=[group_col, date_col])
 
+    # Función para agregar lags por grupo
     def _add_lags(group):
         for lag in range(1, max_daily_lag + 1):
             group[f"{target_col}_lag_{lag}"] = group[target_col].shift(lag)
@@ -85,12 +87,13 @@ def create_lag_features(
             group[f"{target_col}_weekday_lag_{i}"] = group[target_col].shift(lag_days)
         return group
 
+    # Aplicar la función de lags por grupo
     df = df.groupby(group_col, group_keys=False).apply(_add_lags)
     return df
 
 
 def create_rolling_features(
-    df: pd.DataFrame, target_col: str, group_col: str, date_col: str = "date"
+    df: pd.DataFrame, target_col: str, group_col: str, date_col: str = "fecha"
 ) -> pd.DataFrame:
     """
     Crea variables de tipo promedio móvil por grupo (SKU), excluyendo ceros.
@@ -99,7 +102,7 @@ def create_rolling_features(
     - Últimos 2 días
     - Últimos 7 días
     - Semana anterior completa (días -14 a -7)
-    - Mismo día de la semana en las dos semanas anteriores
+    - Mismo día de la semana en las dos y tres semanas anteriores
 
     Parámetros:
     - df: DataFrame con columna target y columna de fecha.
@@ -113,8 +116,10 @@ def create_rolling_features(
     df = df.sort_values(by=[group_col, date_col])
 
     def _add_rolling_features(group):
+        # reemplazar ceros por NaN para evitar promedios erróneos
         target_no_zero = group[target_col].replace(0, np.nan)
 
+        ## Promedios móviles
         group[f"{target_col}_rolling_2"] = (
             target_no_zero.shift(1).rolling(window=2, min_periods=1).mean()
         )
@@ -127,17 +132,73 @@ def create_rolling_features(
             target_no_zero.shift(7).rolling(window=7, min_periods=1).mean()
         )
 
-        same_dow_lags = [7, 14]
-        same_dow_values = []
+        # Promedio de los mismos días de la semana en las 2 semanas anteriores
+        same_dow_lags_2wks = [7, 14]
+        same_dow_values_2wks = [target_no_zero.shift(lag) for lag in same_dow_lags_2wks]
+        group[f"{target_col}_dow_avg_2wks"] = pd.concat(
+            same_dow_values_2wks, axis=1
+        ).mean(axis=1)
 
-        for lag in same_dow_lags:
-            same_dow_values.append(target_no_zero.shift(lag))
-
-        group[f"{target_col}_dow_avg_2wks"] = pd.concat(same_dow_values, axis=1).mean(
-            axis=1
-        )
+        # Promedio de los mismos días de la semana en las 3 semanas anteriores
+        same_dow_lags_3wks = [7, 14, 21]
+        same_dow_values_3wks = [target_no_zero.shift(lag) for lag in same_dow_lags_3wks]
+        group[f"{target_col}_dow_avg_3wks"] = pd.concat(
+            same_dow_values_3wks, axis=1
+        ).mean(axis=1)
 
         return group
 
     df = df.groupby(group_col, group_keys=False).apply(_add_rolling_features)
+    return df
+
+
+def create_stl_features(
+    df: pd.DataFrame,
+    target_col: str,
+    group_col: str,
+    date_col: str = "fecha",
+    seasonal: int = 7,
+    stl_lags: int = 14,
+) -> pd.DataFrame:
+    """
+    Aplica descomposición STL por grupo (SKU) y genera lags de los componentes.
+
+    Parámetros:
+    - df: DataFrame con fecha y target.
+    - target_col: Columna de demanda.
+    - group_col: Columna del SKU.
+    - date_col: Columna de fecha.
+    - seasonal: Periodo estacional esperado (7 = semanal).
+    - stl_lags: Número de lags a generar para cada componente.
+
+    Retorna:
+    - DataFrame con columnas de tendencia y estacionalidad + sus lags.
+    """
+    df = df.copy()
+    df = df.sort_values(by=[group_col, date_col])
+
+    # Función para aplicar STL (descomposición) por grupo
+    def _apply_stl(group):
+        group = group.copy()
+        series = group[target_col].fillna(0).values
+        try:
+            stl = STL(series, period=seasonal, robust=True)
+            res = stl.fit()
+            group["stl_trend"] = res.trend
+            group["stl_seasonal"] = res.seasonal
+        except Exception:
+            group["stl_trend"] = np.nan
+            group["stl_seasonal"] = np.nan
+        return group
+
+    df = df.groupby(group_col, group_keys=False).apply(_apply_stl)
+
+    # Crear lags de cada componente
+    for comp in ["stl_trend", "stl_seasonal"]:
+        for lag in range(1, stl_lags + 1):
+            df[f"{comp}_lag_{lag}"] = df.groupby(group_col)[comp].shift(lag)
+
+    # eliminar el trend y la estacionalidad originales
+    df.drop(columns=["stl_trend", "stl_seasonal"], inplace=True)
+
     return df
